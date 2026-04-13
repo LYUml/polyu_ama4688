@@ -22,7 +22,12 @@ P_DIS_MAX_KW = 2500.0
 SOC0 = 0.50
 
 R_TARGET = 0.99
-CAPACITY_GRID = np.arange(0, 2001, 50)
+CAPACITY_GRID = np.arange(0, 1001, 10)
+
+# Monte Carlo parameters
+N_MC_SAMPLES = 100
+RANDOM_SEED = 42
+LOAD_UNCERTAINTY_STD = 0.357  # from NASA Power CV analysis
 
 
 def load_inputs(weather_csv, load_csv):
@@ -134,6 +139,43 @@ def simulate_once(df, batt_kwh):
     }
 
 
+def generate_mc_sample(df, seed):
+    """
+    Generate Monte Carlo sample by perturbing load with uncertainty factor.
+    Preserves temporal structure while introducing realistic load variability.
+    """
+    np.random.seed(seed)
+    df_sample = df.copy()
+    # Apply multiplicative perturbation to load based on uncertainty from NASA data
+    perturbation = np.random.normal(1.0, LOAD_UNCERTAINTY_STD, len(df))
+    df_sample['load_kw'] = df_sample['load_kw'] * perturbation
+    df_sample['load_kw'] = df_sample['load_kw'].clip(lower=0)
+    return df_sample
+
+
+def run_monte_carlo(df, batt_kwh, n_samples=N_MC_SAMPLES):
+    """
+    对单一电池容量运行蒙特卡洛模拟。
+    返回可靠性的均值、标准差和分布。
+    """
+    reliability_samples = []
+    
+    for i in range(n_samples):
+        df_sample = generate_mc_sample(df, seed=RANDOM_SEED + i)
+        res = simulate_once(df_sample, batt_kwh)
+        reliability_samples.append(res["reliability"])
+    
+    reliability_samples = np.array(reliability_samples)
+    
+    return {
+        "mean": np.mean(reliability_samples),
+        "std": np.std(reliability_samples),
+        "samples": reliability_samples,
+        "p05": np.percentile(reliability_samples, 5),
+        "p95": np.percentile(reliability_samples, 95)
+    }
+
+
 def main():
     out = OUT_DIR
     out.mkdir(parents=True, exist_ok=True)
@@ -143,49 +185,101 @@ def main():
     df = load_inputs(WEATHER_CSV, LOAD_CSV)
     print(f"Data: {len(df)} hours, {df['datetime'].min().date()} to {df['datetime'].max().date()}")
 
-    print("Running capacity scan...")
-    rows = []
+    # ===== 确定性基准情景 =====
+    print("\n=== Running deterministic baseline scenario ===")
+    print("Running capacity scan (deterministic)...")
+    rows_det = []
     for b in CAPACITY_GRID:
         res = simulate_once(df, batt_kwh=float(b))
-        rows.append({
+        rows_det.append({
             "battery_kwh": b,
             "reliability": res["reliability"],
             "ens_kwh": res["ens_kwh"],
             "lolp": res["lolp"]
         })
 
-    result_df = pd.DataFrame(rows)
-    result_df.to_csv(out / "baseline_capacity_scan.csv", index=False)
+    result_df_det = pd.DataFrame(rows_det)
+    result_df_det.to_csv(out / "deterministic_capacity_scan.csv", index=False)
 
-    feasible = result_df[result_df["reliability"] >= R_TARGET]
-    b_star = float(feasible["battery_kwh"].min()) if not feasible.empty else np.nan
+    feasible_det = result_df_det[result_df_det["reliability"] >= R_TARGET]
+    b_star_det = float(feasible_det["battery_kwh"].min()) if not feasible_det.empty else np.nan
+    
+    print(f"Deterministic result: B* = {b_star_det:.0f} kWh")
 
+    # ===== 蒙特卡洛情景 =====
+    print("\n=== Running Monte Carlo scenario ===")
+    print(f"Running capacity scan with {N_MC_SAMPLES} MC samples...")
+    rows_mc = []
+    for b in CAPACITY_GRID:
+        print(f"  Battery capacity: {b:.0f} kWh")
+        mc_result = run_monte_carlo(df, batt_kwh=float(b), n_samples=N_MC_SAMPLES)
+        rows_mc.append({
+            "battery_kwh": b,
+            "reliability_mean": mc_result["mean"],
+            "reliability_std": mc_result["std"],
+            "reliability_p05": mc_result["p05"],
+            "reliability_p95": mc_result["p95"]
+        })
+
+    result_df_mc = pd.DataFrame(rows_mc)
+    result_df_mc.to_csv(out / "monte_carlo_capacity_scan.csv", index=False)
+
+    feasible_mc = result_df_mc[result_df_mc["reliability_mean"] >= R_TARGET]
+    b_star_mc = float(feasible_mc["battery_kwh"].min()) if not feasible_mc.empty else np.nan
+    
+    print(f"Monte Carlo result: B* = {b_star_mc:.0f} kWh (mean reliability >= {R_TARGET:.0%})")
+
+    # ===== 绘图：对比两种情景 =====
+    plt.figure(figsize=(10, 6))
+    plt.plot(result_df_det["battery_kwh"], result_df_det["reliability"], 
+             marker="o", linewidth=2, label="Deterministic", color="blue")
+    plt.plot(result_df_mc["battery_kwh"], result_df_mc["reliability_mean"], 
+             marker="s", linewidth=2, label="MC Mean", color="red")
+    plt.fill_between(result_df_mc["battery_kwh"], 
+                     result_df_mc["reliability_p05"], 
+                     result_df_mc["reliability_p95"],
+                     alpha=0.2, color="red", label="MC 5-95% CI")
+    plt.axhline(R_TARGET, linestyle="--", color="black", alpha=0.5, label=f"Target ({R_TARGET:.0%})")
+    if not np.isnan(b_star_det):
+        plt.axvline(b_star_det, linestyle=":", color="blue", alpha=0.5, label=f"B* Det = {b_star_det:.0f} kWh")
+    if not np.isnan(b_star_mc):
+        plt.axvline(b_star_mc, linestyle=":", color="red", alpha=0.5, label=f"B* MC = {b_star_mc:.0f} kWh")
+    plt.xlabel("Battery Capacity (kWh)", fontsize=11)
+    plt.ylabel("Reliability", fontsize=11)
+    plt.title("Deterministic vs. Monte Carlo: System Reliability vs Battery Capacity", fontsize=12)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=9)
+    plt.tight_layout()
+    plt.savefig(out / "figures" / "deterministic_vs_mc.png", dpi=200)
+    plt.close()
+
+    # ===== 确定性情景的旧图 =====
     plt.figure(figsize=(8, 5))
-    plt.plot(result_df["battery_kwh"], result_df["reliability"], marker="o", linewidth=2)
+    plt.plot(result_df_det["battery_kwh"], result_df_det["reliability"], marker="o", linewidth=2)
     plt.axhline(R_TARGET, linestyle="--", color="red", label=f"Target ({R_TARGET:.0%})")
-    if not np.isnan(b_star):
-        plt.axvline(b_star, linestyle=":", color="green", label=f"B* = {b_star:,.0f} kWh")
+    if not np.isnan(b_star_det):
+        plt.axvline(b_star_det, linestyle=":", color="green", label=f"B* = {b_star_det:,.0f} kWh")
     plt.xlabel("Battery Capacity (kWh)")
     plt.ylabel("Reliability")
-    plt.title("System Reliability vs Battery Capacity")
+    plt.title("System Reliability vs Battery Capacity (Deterministic)")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(out / "figures" / "capacity_vs_reliability.png", dpi=200)
+    plt.savefig(out / "figures" / "capacity_vs_reliability_det.png", dpi=200)
     plt.close()
 
     plt.figure(figsize=(8, 5))
-    plt.plot(result_df["battery_kwh"], result_df["ens_kwh"], marker="o", color="orange", linewidth=2)
+    plt.plot(result_df_det["battery_kwh"], result_df_det["ens_kwh"], marker="o", color="orange", linewidth=2)
     plt.xlabel("Battery Capacity (kWh)")
     plt.ylabel("Energy Not Supplied (kWh/year)")
-    plt.title("System ENS vs Battery Capacity")
+    plt.title("System ENS vs Battery Capacity (Deterministic)")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(out / "figures" / "capacity_vs_ens.png", dpi=200)
     plt.close()
 
-    if not np.isnan(b_star):
-        res_star = simulate_once(df, batt_kwh=b_star)
+    if not np.isnan(b_star_det):
+        res_star = simulate_once(df, batt_kwh=b_star_det)
         tmp = df.copy()
         tmp["soc"] = res_star["soc"]
         tmp_week = tmp.iloc[:24 * 7]
@@ -197,17 +291,15 @@ def main():
         plt.ylim(0, 1)
         plt.ylabel("SOC")
         plt.xlabel("Date")
-        plt.title(f"Battery State of Charge (First Week, B*={b_star:,.0f} kWh)")
+        plt.title(f"Battery State of Charge (First Week, B*={b_star_det:,.0f} kWh)")
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(out / "figures" / "soc_first_week.png", dpi=200)
         plt.close()
 
-    print(f"Results saved to {out / 'baseline_capacity_scan.csv'}")
-    if not np.isnan(b_star):
-        print(f"Minimum battery for {R_TARGET:.0%} reliability: {b_star:,.0f} kWh")
-    else:
-        print(f"Target reliability {R_TARGET:.0%} not achievable with given parameters")
+    print(f"\nResults saved to {out}")
+    print(f"Deterministic: B* = {b_star_det:.0f} kWh")
+    print(f"Monte Carlo:   B* = {b_star_mc:.0f} kWh")
 
 
 if __name__ == "__main__":
