@@ -1,22 +1,13 @@
-# PV + Battery Sizing Optimization with Uncertainty Analysis
+# PV + Battery Sizing Analysis
 
-A Monte Carlo-based energy simulation framework for optimizing solar-battery microgrid sizing under load uncertainty.
+Optimal battery capacity sizing for a 5 MW solar system with 99% reliability target.
 
-## Overview
+## Key Results
 
-This project performs optimal battery capacity sizing for a **5 MW photovoltaic (PV) system** serving a **~484 MWh annual load**, targeting **99% system reliability**. The analysis includes:
-
-- **Deterministic optimization**: Sizing based on average/median conditions
-- **Stochastic analysis**: Monte Carlo sampling with load uncertainty (σ=0.357)
-- **Comparison**: Quantifying the gap between deterministic and MC-based designs
-
-### Key Results
-
-| Method | Battery Capacity | Reliability | Notes |
-|--------|------------------|-------------|-------|
-| Deterministic | **570 kWh** | 99.04% | Conservative baseline |
-| Monte Carlo | **600 kWh** | 99.08% | Accounts for demand variability |
-| **Difference** | **+30 kWh (5.3%)** | — | MC requires larger buffer |
+| Method | Battery Capacity | Reliability |
+|--------|------------------|------------|
+| Deterministic | 570 kWh | 99.04% |
+| Monte Carlo | 600 kWh | 99.08% |
 
 ---
 
@@ -131,20 +122,3 @@ This script extracts load variability statistics from NASA POWER data to calibra
 | Hong Kong Observatory (GovData) | `govdata_merged_2025.csv` | Primary weather data (5 stations, daily GHI) |
 | Load profile (EnergyPlus) | `load_hourly_clean.csv` | Demand time series (8,760 hours) |
 | NASA POWER (archive) | — | Validation & uncertainty calibration only |
-
----
-
-## Key Findings
-
-✓ **MC-based sizing is ~5% larger** than deterministic baseline  
-✓ **Confidence interval narrow** (P5–P95 < 0.3% spread) → 100 samples sufficient  
-✓ **Deterministic underestimates risk** by ignoring load variability  
-✓ **GovData superior to NASA** for local predictions (0.2% → realistic coverage)
-
----
-
-## Author & Attribution
-
-**Project:** AMA 4688 Microgrid Design (PolyU)  
-**Repository:** [github.com/LYUml/polyu_ama4688](https://github.com/LYUml/polyu_ama4688)  
-**Last updated:** 2026-04-14
