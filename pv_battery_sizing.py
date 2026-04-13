@@ -232,9 +232,9 @@ def main():
     # ===== 绘图：对比两种情景 =====
     plt.figure(figsize=(10, 6))
     plt.plot(result_df_det["battery_kwh"], result_df_det["reliability"], 
-             marker="o", linewidth=2, label="Deterministic", color="blue")
+             marker="x", markersize=6, linewidth=2, label="Deterministic", color="blue")
     plt.plot(result_df_mc["battery_kwh"], result_df_mc["reliability_mean"], 
-             marker="s", linewidth=2, label="MC Mean", color="red")
+             marker="x", markersize=6, linewidth=2, label="MC Mean", color="red")
     plt.fill_between(result_df_mc["battery_kwh"], 
                      result_df_mc["reliability_p05"], 
                      result_df_mc["reliability_p95"],
@@ -255,7 +255,7 @@ def main():
 
     # ===== 确定性情景的旧图 =====
     plt.figure(figsize=(8, 5))
-    plt.plot(result_df_det["battery_kwh"], result_df_det["reliability"], marker="o", linewidth=2)
+    plt.plot(result_df_det["battery_kwh"], result_df_det["reliability"], marker="x", markersize=6, linewidth=2)
     plt.axhline(R_TARGET, linestyle="--", color="red", label=f"Target ({R_TARGET:.0%})")
     if not np.isnan(b_star_det):
         plt.axvline(b_star_det, linestyle=":", color="green", label=f"B* = {b_star_det:,.0f} kWh")
@@ -269,7 +269,7 @@ def main():
     plt.close()
 
     plt.figure(figsize=(8, 5))
-    plt.plot(result_df_det["battery_kwh"], result_df_det["ens_kwh"], marker="o", color="orange", linewidth=2)
+    plt.plot(result_df_det["battery_kwh"], result_df_det["ens_kwh"], marker="x", markersize=6, color="orange", linewidth=2)
     plt.xlabel("Battery Capacity (kWh)")
     plt.ylabel("Energy Not Supplied (kWh/year)")
     plt.title("System ENS vs Battery Capacity (Deterministic)")
