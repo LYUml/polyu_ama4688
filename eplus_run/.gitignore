@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# EnergyPlus / generated outputs
+results/energyplus_raw/
+results/load_profiles/
+
+# Logs / temp
+*.log
+*.tmp
